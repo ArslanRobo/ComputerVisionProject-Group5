@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virtual Tour - CS436 Project</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            max-width: 300px;
+            backdrop-filter: blur(10px);
+            z-index: 100;
+        }
+
+        #controls h2 {
+            margin: 0 0 15px 0;
+            font-size: 20px;
+            color: #4CAF50;
+        }
+
+        .control-section {
+            margin-bottom: 15px;
+        }
+
+        .control-section label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+            color: #aaa;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            margin: 5px 5px 5px 0;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background: #555;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .nav-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        #cameraInfo {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 13px;
+            margin-top: 10px;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 30px 50px;
+            border-radius: 15px;
+            font-size: 18px;
+            text-align: center;
+            z-index: 1000;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #4CAF50;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        #error {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 0, 0, 0.9);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            max-width: 500px;
+            display: none;
+            z-index: 1000;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            margin: 8px 0;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            margin-right: 8px;
+            cursor: pointer;
+        }
+
+        .checkbox-group label {
+            margin: 0;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+
+    <div id="loading">
+        <div>Loading 3D Scene...</div>
+        <div class="spinner"></div>
+        <div id="loadingStatus">Initializing...</div>
+    </div>
+
+    <div id="error"></div>
+
+    <div id="controls">
+        <h2>🎥 Virtual Tour Controls</h2>
+        
+        <div class="control-section">
+            <label>Navigation:</label>
+            <div class="nav-buttons">
+                <button id="prevCamera">← Previous</button>
+                <button id="nextCamera">Next →</button>
+            </div>
+            <button id="autoTour" style="width: 100%; margin-top: 10px;">▶ Start Auto Tour</button>
+        </div>
+
+        <div class="control-section">
+            <div class="checkbox-group">
+                <input type="checkbox" id="showCameras" checked>
+                <label for="showCameras">Show Camera Positions</label>
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="showPoints" checked>
+                <label for="showPoints">Show Point Cloud</label>
+            </div>
+        </div>
+
+        <div id="cameraInfo">
+            <div><strong>Camera:</strong> <span id="camNum">-</span> / <span id="totalCams">-</span></div>
+            <div><strong>Position:</strong> <span id="camPos">-</span></div>
+        </div>
+
+        <div style="margin-top: 15px; font-size: 11px; color: #888;">
+            <strong>Mouse Controls:</strong><br>
+            Left drag: Rotate | Right drag: Pan | Scroll: Zoom
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/PLYLoader.js"></script>
+
+    <script>
+        // ===== SCENE SETUP =====
+        let scene, camera, renderer, controls;
+        let pointCloud, cameraHelpers = [];
+        let cameras = [];
+        let currentCameraIndex = 0;
+        let isTransitioning = false;
+        let autoTourInterval = null;
+
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a1a);
+            scene.fog = new THREE.Fog(0x1a1a1a, 10, 50);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(
+                60,
+                window.innerWidth / window.innerHeight,
+                0.01,
+                100
+            );
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.getElementById('container').appendChild(renderer.domElement);
+
+            // Orbit Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 0.1;
+            controls.maxDistance = 50;
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.4);
+            dirLight.position.set(10, 10, 10);
+            scene.add(dirLight);
+
+            // Grid helper
+            const gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
+            scene.add(gridHelper);
+
+            // Window resize
+            window.addEventListener('resize', onWindowResize);
+
+            // Load data
+            loadData();
+        }
+
+        // ===== LOAD POINT CLOUD AND CAMERAS =====
+        async function loadData() {
+            try {
+                updateLoadingStatus('Loading point cloud...');
+                await loadPointCloud();
+                
+                updateLoadingStatus('Loading camera data...');
+                await loadCameras();
+                
+                hideLoading();
+                setupControls();
+                animate();
+            } catch (error) {
+                showError('Error loading data: ' + error.message);
+                console.error(error);
+            }
+        }
+
+        function loadPointCloud() {
+            return new Promise((resolve, reject) => {
+                const loader = new THREE.PLYLoader();
+                
+                loader.load(
+                    'complete_room_web_old.ply',
+                    (geometry) => {
+                        geometry.computeBoundingBox();
+                        geometry.center();
+
+                        const material = new THREE.PointsMaterial({
+                            size: 0.01,
+                            vertexColors: true,
+                            sizeAttenuation: true
+                        });
+
+                        pointCloud = new THREE.Points(geometry, material);
+                        scene.add(pointCloud);
+
+                        console.log('✓ Point cloud loaded:', geometry.attributes.position.count, 'points');
+                        resolve();
+                    },
+                    (progress) => {
+                        const percent = (progress.loaded / progress.total * 100).toFixed(0);
+                        updateLoadingStatus(`Loading point cloud: ${percent}%`);
+                    },
+                    (error) => {
+                        reject(new Error('Failed to load point cloud: ' + error));
+                    }
+                );
+            });
+        }
+
+        async function loadCameras() {
+            try {
+                const response = await fetch('cameras.json');
+                if (!response.ok) throw new Error('Failed to load cameras.json');
+                
+                const data = await response.json();
+                cameras = data.cameras;
+
+                // Create camera visualizations
+                cameras.forEach((cam, index) => {
+                    // Camera position sphere
+                    const sphereGeom = new THREE.SphereGeometry(0.05, 16, 16);
+                    const sphereMat = new THREE.MeshBasicMaterial({ 
+                        color: 0x00ff00 
+                    });
+                    const sphere = new THREE.Mesh(sphereGeom, sphereMat);
+                    sphere.position.set(...cam.center);
+                    scene.add(sphere);
+
+                    // Camera orientation axes
+                    const axesHelper = new THREE.AxesHelper(0.2);
+                    axesHelper.position.set(...cam.center);
+                    scene.add(axesHelper);
+
+                    cameraHelpers.push(sphere, axesHelper);
+                });
+
+                console.log('✓ Loaded', cameras.length, 'cameras');
+                
+                // Set initial camera position
+                if (cameras.length > 0) {
+                    setCameraPosition(0);
+                    document.getElementById('totalCams').textContent = cameras.length;
+                }
+            } catch (error) {
+                throw new Error('Failed to load cameras: ' + error.message);
+            }
+        }
+
+        // ===== CAMERA NAVIGATION =====
+        function setCameraPosition(index) {
+            if (index < 0 || index >= cameras.length) return;
+
+            const cam = cameras[index];
+            const pos = cam.center;
+
+            camera.position.set(pos[0], pos[1], pos[2]);
+
+            // Set camera orientation from rotation matrix
+            const R = cam.rotation;
+            const mat = new THREE.Matrix4();
+            mat.set(
+                R[0][0], R[0][1], R[0][2], 0,
+                R[1][0], R[1][1], R[1][2], 0,
+                R[2][0], R[2][1], R[2][2], 0,
+                0, 0, 0, 1
+            );
+
+            camera.quaternion.setFromRotationMatrix(mat);
+            
+            currentCameraIndex = index;
+            updateCameraInfo();
+            
+            // Update OrbitControls target to look forward from camera
+            const forward = new THREE.Vector3(0, 0, -1);
+            forward.applyQuaternion(camera.quaternion);
+            controls.target.copy(camera.position).add(forward);
+            controls.update();
+        }
+
+        function animateTransition(fromIndex, toIndex) {
+            if (isTransitioning) return;
+            if (toIndex < 0 || toIndex >= cameras.length) return;
+
+            isTransitioning = true;
+            const duration = 1500;
+            const startTime = Date.now();
+
+            const fromCam = cameras[fromIndex];
+            const toCam = cameras[toIndex];
+
+            const startPos = new THREE.Vector3(...fromCam.center);
+            const endPos = new THREE.Vector3(...toCam.center);
+
+            const startQuat = camera.quaternion.clone();
+
+            // Calculate end quaternion
+            const R = toCam.rotation;
+            const endMatrix = new THREE.Matrix4();
+            endMatrix.set(
+                R[0][0], R[0][1], R[0][2], 0,
+                R[1][0], R[1][1], R[1][2], 0,
+                R[2][0], R[2][1], R[2][2], 0,
+                0, 0, 0, 1
+            );
+            const endQuat = new THREE.Quaternion();
+            endQuat.setFromRotationMatrix(endMatrix);
+
+            function animate() {
+                const elapsed = Date.now() - startTime;
+                const t = Math.min(elapsed / duration, 1);
+
+                // Smooth easing
+                const easeT = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+
+                // Interpolate position (Lerp)
+                camera.position.lerpVectors(startPos, endPos, easeT);
+
+                // Interpolate rotation (Slerp)
+                THREE.Quaternion.slerp(startQuat, endQuat, camera.quaternion, easeT);
+
+                // Update controls
+                const forward = new THREE.Vector3(0, 0, -1);
+                forward.applyQuaternion(camera.quaternion);
+                controls.target.copy(camera.position).add(forward);
+                controls.update();
+
+                if (t < 1) {
+                    requestAnimationFrame(animate);
+                } else {
+                    setCameraPosition(toIndex);
+                    isTransitioning = false;
+                }
+            }
+
+            animate();
+        }
+
+        // ===== UI CONTROLS =====
+        function setupControls() {
+            document.getElementById('prevCamera').addEventListener('click', () => {
+                if (cameras.length === 0) return;
+                const prevIndex = (currentCameraIndex - 1 + cameras.length) % cameras.length;
+                animateTransition(currentCameraIndex, prevIndex);
+            });
+
+            document.getElementById('nextCamera').addEventListener('click', () => {
+                if (cameras.length === 0) return;
+                const nextIndex = (currentCameraIndex + 1) % cameras.length;
+                animateTransition(currentCameraIndex, nextIndex);
+            });
+
+            document.getElementById('autoTour').addEventListener('click', toggleAutoTour);
+
+            document.getElementById('showCameras').addEventListener('change', (e) => {
+                cameraHelpers.forEach(helper => {
+                    helper.visible = e.target.checked;
+                });
+            });
+
+            document.getElementById('showPoints').addEventListener('change', (e) => {
+                if (pointCloud) pointCloud.visible = e.target.checked;
+            });
+
+            // Keyboard controls
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'ArrowRight') {
+                    document.getElementById('nextCamera').click();
+                } else if (e.key === 'ArrowLeft') {
+                    document.getElementById('prevCamera').click();
+                } else if (e.key === ' ') {
+                    e.preventDefault();
+                    toggleAutoTour();
+                }
+            });
+        }
+
+        function toggleAutoTour() {
+            const button = document.getElementById('autoTour');
+            
+            if (autoTourInterval) {
+                clearInterval(autoTourInterval);
+                autoTourInterval = null;
+                button.textContent = '▶ Start Auto Tour';
+                button.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+            } else {
+                autoTourInterval = setInterval(() => {
+                    const nextIndex = (currentCameraIndex + 1) % cameras.length;
+                    animateTransition(currentCameraIndex, nextIndex);
+                }, 3000);
+                button.textContent = '⏸ Stop Auto Tour';
+                button.style.background = 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)';
+            }
+        }
+
+        function updateCameraInfo() {
+            document.getElementById('camNum').textContent = currentCameraIndex + 1;
+            const pos = cameras[currentCameraIndex].center;
+            document.getElementById('camPos').textContent = 
+                `(${pos[0].toFixed(2)}, ${pos[1].toFixed(2)}, ${pos[2].toFixed(2)})`;
+        }
+
+        // ===== UTILITY FUNCTIONS =====
+        function updateLoadingStatus(message) {
+            document.getElementById('loadingStatus').textContent = message;
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            hideLoading();
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // ===== RENDER LOOP =====
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // ===== START =====
+        init();
+    </script>
+</body>
+</html>
